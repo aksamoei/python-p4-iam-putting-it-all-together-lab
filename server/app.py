@@ -1,427 +1,146 @@
 #!/usr/bin/env python3
 
-from flask import request, session, jsonify, make_response
+from flask import request, session, jsonify
 from flask_restful import Resource
 from sqlalchemy.exc import IntegrityError
 
 from config import app, db, api
 from models import User, Recipe
 
+@app.before_request
+def check_if_logged_in():
+    open_access_list = [
+        "signup",
+        "login",
+        "check_session"
+    ]
+    
+    if (request.endpoint) not in open_access_list and (not session.get("user_id")):
+        return {"error": "401 Unauthorized"}, 401
+
 class Signup(Resource):
+    
     def post(self):
-        data = request.get_json()
-        new_username = data.get('username')
-        new_image_url = data.get('image_url')
-        new_bio = data.get('bio')
-
-        if not new_username or len(new_username) < 1:
-            response = make_response({"error" : "Username must not be empty"}, 422)
-            return response
-        elif User.query.filter(User.username == new_username).first():
-            response = make_response({"error": "Username must be unique"}, 422)
-            return response
-        else:
-            new_validated_username = new_username
-
-        new_user = User(
-            username = new_validated_username, 
-            bio = new_bio,
-            image_url = new_image_url
-        )
-
-        new_user.password_hash = data.get('password')
-
-        db.session.add(new_user)
-        db.session.commit()
-
-        session['user_id'] = new_user.id
-
-        new_user_dict = new_user.to_dict()
-        response = make_response(new_user_dict, 201)
-        return response
         
+        data = request.get_json()
+        
+        username = data.get("username")
+        password = data.get("password")
+        image_url = data.get("image_url")
+        bio = data.get("bio")
+        
+        if not username or not password or not image_url or not bio:
+            return {"error": "All fields (username, password, image_url, bio) are required"}, 422
+        
+        user = User(
+            username=username,
+            image_url=image_url,
+            bio=bio
+        )
+        
+        # the setter will encrypt this
+        user.password_hash = password
+        
+        try:
+            db.session.add(user)
+            db.session.commit()
+            
+            session["user_id"] = user.id
+            
+            return user.to_dict(), 201
+        
+        except IntegrityError:
+            db.session.rollback()
+            return {"error": "Username already exists"}, 422
+        
+
+
+
+        #CLASDD
 
 class CheckSession(Resource):
-    def get(self):
-        user = User.query.filter(User.id == session.get("user_id")).first()
-        if user:
-            user_dict = user.to_dict()
-            response = make_response(user_dict, 200)
-            return response
-        else:
-            response_dict = {"error" : "Unauthorized: please login"}
-            response = make_response(response_dict, 401)
-            return response
     
-class Login(Resource):
-    def post(self):
-        data = request.get_json()
-        the_username = data.get('username')
-        the_password = data.get('password')
-        user = User.query.filter(User.username == the_username).first()
-
-        if user and user.authenticate(the_password):
-            session["user_id"] = user.id
-            user_dict = user.to_dict()
-            response = make_response(user_dict, 200)
-            return response
+    def get(self):
+        
+        user_id = session.get('user_id')
+        if user_id:
+            user = User.query.filter(User.id == user_id).first()
+            return user.to_dict()
         else:
-            response_dict = {"error" : "Unauthorized: wrong username/password"}
-            response = make_response(response_dict, 401)
-            return response
+            return {}, 401
+        
+class Login(Resource):
+    
+    def post(self):
+
+        request_json = request.get_json()
+
+        username = request_json.get('username')
+        password = request_json.get('password')
+
+        user = User.query.filter(User.username == username).first()
+
+        if user and user.authenticate(password):
+            session['user_id'] = user.id
+            return user.to_dict(), 200
+
+        return {'error': '401 Unauthorized'}, 401
 
 class Logout(Resource):
+
     def delete(self):
-        if session["user_id"]:
-
-            session["user_id"] = None
-            return make_response({}, 204)
+        if 'user_id' in session:
+            session['user_id'] = None
+            return {}, 204
         else:
-            response_dict = {"error" : "Unauthorized. You need to login to logout"}
-            response = make_response(response_dict, 401)
-            return response
-        
-# user_recipes = {}
-# class RecipeIndex(Resource):
-#     ''''''
-#     def get(self):
-#         if not session["user_id"]:
-#             resp_dict = {"error" : "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-#         else:
-#             the_user_id = session.get("user_id")
-#             user = User.query.filter(User.id == the_user_id).first()
-
-#             user_specific_recipes =  user.recipes
-
-#             the_list = [recipe for recipe in user_specific_recipes]
-            
-#             user_dict = user.to_dict()
-
-#             the_list.append(user_dict)
-
-#             return make_response(jsonify(the_list), 200)
-
-
-#     def post(self):
-#         if "user_id" not in session:
-#             resp_dict = {"error" : "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-#         else:
-#             data = request.get_json()
-#             new_title = data.get('title')
-#             new_instructions = data.get('instructions')
-#             new_minutes_to_complete = data.get('minutes_to_complete')
-
-#             if len(new_title) < 1:
-#                 resp_dict = {"error" : "The title should not be empty"}
-#                 response = make_response(jsonify(resp_dict), 422)
-#                 return response
-#             else:
-#                 new_validated_title = new_title
-            
-#             if len(new_instructions) < 1:
-#                 resp_dict = {"error" : "The instructions shpould not be empty"}
-#                 response = make_response(jsonify(resp_dict), 422)
-#                 return response
-#             else:
-#                 new_validated_instructions = new_instructions
-
-#             if not isinstance(new_minutes_to_complete, int):
-#                 resp_dict = {"error" : "Minutes to complete should be an integer"}
-#                 response = make_response(jsonify(resp_dict), 422)
-#                 return response
-#             else:
-#                 validated_minutes_to_complete = new_minutes_to_complete
-            
-#             user = User.query.filter(User.id == session.get("user_id")).first()
-#             if not user:
-#                 resp_dict = {"error": "User not found"}
-#                 response = make_response(jsonify(resp_dict), 401)
-#                 return response
-
-#             new_recipe = Recipe(
-#                 title = new_validated_title,
-#                 instructions = new_validated_instructions,
-#                 minutes_to_complete = validated_minutes_to_complete
-#             )
-            
-#             if new_recipe:
-#                 user.recipes.append(new_recipe)
-                
-#                 db.session.add(new_recipe)
-#                 db.session.commit()
-
-
-
-#                 response_dict = {
-#                     "title" : new_recipe.title,
-#                     "instructions" : new_recipe.instructions,
-#                     "minutes_to_complete" : new_recipe.minutes_to_complete,
-#                     "user" : user.to_dict()
-#                 }
-
-#                 return make_response(jsonify(response_dict), 201)
-#             else:
-#                 resp_dict = {"error" : "wrong entries"}
-#                 response = make_response(jsonify(resp_dict), 422)
-#                 return response
-
-# class RecipeIndex(Resource):
-#     def get(self):
-#         if "user_id" not in session:
-#             resp_dict = {"error": "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         user = User.query.filter(User.id == session["user_id"]).first()
-#         if not user:
-#             resp_dict = {"error": "User not found"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         user_recipes = Recipe.query.filter(Recipe.user_id == user.id).all()
-#         recipe_list = [recipe.to_dict() for recipe in user_recipes]
-
-#         response_dict = {
-#             "recipes": recipe_list,
-#             "user": user.to_dict()
-#         }
-
-#         return make_response(jsonify(response_dict), 200)
-
-#     def post(self):
-#         if "user_id" not in session:
-#             resp_dict = {"error": "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         data = request.get_json()
-#         new_title = data.get('title')
-#         new_instructions = data.get('instructions')
-#         new_minutes_to_complete = data.get('minutes_to_complete')
-
-#         if not new_title or len(new_title) < 1:
-#             resp_dict = {"error": "The title should not be empty"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         if not new_instructions or len(new_instructions) < 50:
-#             resp_dict = {"error": "The instructions should be at least 50 characters long"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         if not isinstance(new_minutes_to_complete, int):
-#             resp_dict = {"error": "Minutes to complete should be an integer"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         user = User.query.filter(User.id == session["user_id"]).first()
-#         if not user:
-#             resp_dict = {"error": "User not found"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         new_recipe = Recipe(
-#             title=new_title,
-#             instructions=new_instructions,
-#             minutes_to_complete=new_minutes_to_complete,
-#             user_id=user.id  # Assuming there's a way to set user_id
-#         )
-
-#         try:
-#             db.session.add(new_recipe)
-#             db.session.commit()
-#         except IntegrityError as e:
-#             db.session.rollback()
-#             resp_dict = {"error": str(e)}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         response_dict = {
-#             "title": new_recipe.title,
-#             "instructions": new_recipe.instructions,
-#             "minutes_to_complete": new_recipe.minutes_to_complete,
-#             "user": user.to_dict()
-#         }
-
-#         return make_response(jsonify(response_dict), 201)
-
-# class RecipeIndex(Resource):
-#     def get(self):
-#         if "user_id" not in session:
-#             resp_dict = {"error": "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         try:
-#             user = User.query.filter(User.id == session["user_id"]).first()
-#             if not user:
-#                 resp_dict = {"error": "User not found"}
-#                 response = make_response(jsonify(resp_dict), 401)
-#                 return response
-
-#             user_recipes = Recipe.query.filter(Recipe.user_id == user.id).all()
-#             recipe_list = [recipe.to_dict() for recipe in user_recipes]
-
-#             response_dict = {
-#                 "recipes": recipe_list,
-#                 "user": user.to_dict()
-#             }
-
-#             return make_response(jsonify(response_dict), 200)
-#         except Exception as e:
-#             response = make_response({"error": str(e)}, 500)
-#             return response
-
-#     def post(self):
-#         if "user_id" not in session:
-#             resp_dict = {"error": "Please login"}
-#             response = make_response(jsonify(resp_dict), 401)
-#             return response
-
-#         data = request.get_json()
-#         new_title = data.get('title')
-#         new_instructions = data.get('instructions')
-#         new_minutes_to_complete = data.get('minutes_to_complete')
-
-#         if not new_title or len(new_title) < 1:
-#             resp_dict = {"error": "The title should not be empty"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         if not new_instructions or len(new_instructions) < 50:
-#             resp_dict = {"error": "The instructions should be at least 50 characters long"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         if not isinstance(new_minutes_to_complete, int):
-#             resp_dict = {"error": "Minutes to complete should be an integer"}
-#             response = make_response(jsonify(resp_dict), 422)
-#             return response
-
-#         try:
-#             user = User.query.filter(User.id == session["user_id"]).first()
-#             if not user:
-#                 resp_dict = {"error": "User not found"}
-#                 response = make_response(jsonify(resp_dict), 401)
-#                 return response
-
-#             new_recipe = Recipe(
-#                 title=new_title,
-#                 instructions=new_instructions,
-#                 minutes_to_complete=new_minutes_to_complete,
-#             )
-
-#             db.session.add(new_recipe)
-#             db.session.commit()
-
-#             response_dict = {
-#                 "title": new_recipe.title,
-#                 "instructions": new_recipe.instructions,
-#                 "minutes_to_complete": new_recipe.minutes_to_complete,
-#             }
-
-#             return make_response(jsonify(response_dict), 201)
-#         except Exception as e:
-#             db.session.rollback()
-#             response = make_response({"error": str(e)}, 500)
-#             return response
+            return {'error': 'Unauthorized.'}, 401
 
 class RecipeIndex(Resource):
+
     def get(self):
-        if "user_id" not in session:
-            resp_dict = {"error": "Please login"}
-            response = make_response(jsonify(resp_dict), 401)
-            return response
 
-        try:
-            user = User.query.filter(User.id == session["user_id"]).first()
-            if not user:
-                resp_dict = {"error": "User not found"}
-                response = make_response(jsonify(resp_dict), 401)
-                return response
-
-            # Fetch recipes associated with the user (assuming user.recipes manages this)
-            recipe_list = [recipe.to_dict() for recipe in user.recipes]
-
-            response_dict = {
-                "recipes": recipe_list,
-                "user": user.to_dict()
-            }
-
-            return make_response(jsonify(response_dict), 200)
-        except Exception as e:
-            response = make_response({"error": str(e)}, 500)
-            return response
-
+        user = User.query.filter(User.id == session['user_id']).first()
+        return [recipe.to_dict() for recipe in user.recipes], 200
+        
     def post(self):
-        if "user_id" not in session:
-            resp_dict = {"error": "Please login"}
-            response = make_response(jsonify(resp_dict), 401)
-            return response
 
-        data = request.get_json()
-        new_title = data.get('title')
-        new_instructions = data.get('instructions')
-        new_minutes_to_complete = data.get('minutes_to_complete')
+        if 'user_id' not in session:
+            return {'message': 'Unauthorized'}, 401
 
-        if not new_title or len(new_title) < 1:
-            resp_dict = {"error": "The title should not be empty"}
-            response = make_response(jsonify(resp_dict), 422)
-            return response
+        json_data = request.get_json()
 
-        if not new_instructions or len(new_instructions) < 50:
-            resp_dict = {"error": "The instructions should be at least 50 characters long"}
-            response = make_response(jsonify(resp_dict), 422)
-            return response
+        if not json_data or 'title' not in json_data or 'instructions' not in json_data or 'minutes_to_complete' not in json_data:
+            return {'message': 'Title, instructions, and minutes to complete are required'}, 400
 
-        if not isinstance(new_minutes_to_complete, int):
-            resp_dict = {"error": "Minutes to complete should be an integer"}
-            response = make_response(jsonify(resp_dict), 422)
-            return response
+        if len(json_data['instructions']) < 50:
+            return {'message': 'Instructions must be at least 50 characters long'}, 422
 
-        try:
-            user = User.query.filter(User.id == session["user_id"]).first()
-            if not user:
-                resp_dict = {"error": "User not found"}
-                response = make_response(jsonify(resp_dict), 401)
-                return response
+        user_id = session['user_id']
+        recipe = Recipe(
+            title=json_data['title'],
+            instructions=json_data['instructions'],
+            minutes_to_complete=json_data['minutes_to_complete'],
+            user_id=user_id
+        )
+        #### CODE IS EAY
 
-            new_recipe = Recipe(
-                title=new_title,
-                instructions=new_instructions,
-                minutes_to_complete=new_minutes_to_complete
-            )
+        db.session.add(recipe)
+        db.session.commit()
 
-            # Manually manage the relationship
-            user.recipes.append(new_recipe)
+        return recipe.to_dict(), 201
 
-            db.session.add(new_recipe)
-            db.session.commit()
-
-            response_dict = {
-                "title": new_recipe.title,
-                "instructions": new_recipe.instructions,
-                "minutes_to_complete": new_recipe.minutes_to_complete,
-                "user": user.to_dict()
-            }
-
-            return make_response(jsonify(response_dict), 201)
-        except Exception as e:
-            db.session.rollback()
-            response = make_response({"error": str(e)}, 500)
-            return response
+api.add_resource(Login, '/login', endpoint='login')
+api.add_resource(Logout, '/logout', endpoint='logout')
+api.add_resource(RecipeIndex, '/recipes', endpoint='recipes')
+#LOOOOLLL
+api.add_resource(Signup, '/signup', endpoint='signup')
+api.add_resource(CheckSession, '/check_session', endpoint='check_session')
 
 
-api.add_resource(Signup, '/signup')
-api.add_resource(Login, '/login')
-api.add_resource(CheckSession, '/check_session')
-api.add_resource(Logout, '/logout')
-api.add_resource(RecipeIndex, '/recipes')
+###FUCK THIS SHIT
+
+
+
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
-
